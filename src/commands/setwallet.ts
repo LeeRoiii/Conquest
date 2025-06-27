@@ -35,7 +35,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const discordId = interaction.user.id;
   const username = interaction.user.tag;
 
-  // 🔒 1. Channel Restriction Check via Supabase
+  // 🔒 1. Channel Restriction Check via Supabaseasdasd
   const guildId = interaction.guildId;
   const currentChannelId = interaction.channelId;
 
