@@ -43,7 +43,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
           .setTitle('⛔ Permission Denied')
           .setDescription('Only admins can view other users\' history.')
       ],
-    });
+    }); 
   }
 
   await interaction.deferReply({ ephemeral: true });

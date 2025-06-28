@@ -41,7 +41,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const discordId = interaction.user.id;
   const guildId = interaction.guildId!;
   const channelId = interaction.channelId;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);  
 
   const { data: config, error: configError } = await supabase
     .from('giveaway_channels')

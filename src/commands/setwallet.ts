@@ -108,7 +108,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const now = new Date();
 
   if (user?.wallet) {
-    embed.addFields({ name: 'Current Wallet', value: `\`${user.wallet}\`` });
 
     const lastUpdated = user.updated_at ? new Date(user.updated_at) : null;
     const diffDays = lastUpdated
@@ -120,7 +119,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       name: 'Wallet Status',
       value: canChange
         ? '✅ You can change your wallet'
-        : `⏳ Next change in ${Math.ceil(WALLET_CHANGE_COOLDOWN_DAYS - diffDays)} days`,
+        : `⏳ Wallet change available in ${Math.ceil(WALLET_CHANGE_COOLDOWN_DAYS - diffDays)} days`,
+      inline: true,
     });
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
