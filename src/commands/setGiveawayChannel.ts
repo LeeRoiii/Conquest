@@ -1,140 +1,180 @@
-  // src/commands/setGiveawayChannel.ts
-  import {
-    SlashCommandBuilder,
-    ChatInputCommandInteraction,
-    PermissionFlagsBits,
-    ChannelType,
-    EmbedBuilder
-  } from 'discord.js';
-  import { supabase } from '../supabaseClient';
+import {
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+  PermissionFlagsBits,
+  ChannelType,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
+} from 'discord.js';
+import { supabase } from '../supabaseClient';
 
-  export const data = new SlashCommandBuilder()
-    .setName('set-giveaway-channel')
-    .setDescription('Set the channel where giveaway messages will be sent')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addChannelOption(option =>
-      option
-        .setName('channel')
-        .setDescription('The channel to use for giveaways')
-        .addChannelTypes(ChannelType.GuildText)
-        .setRequired(true)
-    );
+export const data = new SlashCommandBuilder()
+  .setName('set-giveaway-channel')
+  .setDescription('Set the channel where giveaway messages will be sent')
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  .addChannelOption(option =>
+    option
+      .setName('channel')
+      .setDescription('The channel to use for giveaways')
+      .addChannelTypes(ChannelType.GuildText)
+      .setRequired(true)
+  );
 
-  export async function execute(interaction: ChatInputCommandInteraction) {
-    // 1. Basic Validation
-    const channel = interaction.options.getChannel('channel', true);
-    const guild = interaction.guild;
-    const guildId = interaction.guildId;
+export async function execute(interaction: ChatInputCommandInteraction) {
+  const channel = interaction.options.getChannel('channel', true);
+  const guild = interaction.guild;
+  const guildId = interaction.guildId;
 
-    if (!guild || !guildId) {
+  if (!guild || !guildId) {
+    return interaction.reply({
+      content: '❌ This command must be used in a server.',
+      ephemeral: true,
+    });
+  }
+
+  // Fetch current config
+  const { data: config, error: configError } = await supabase
+    .from('giveaway_channels')
+    .select('channel_id, updated_at')
+    .eq('guild_id', guildId)
+    .maybeSingle();
+
+  if (configError) {
+    console.error('❌ Supabase error:', configError);
+    return interaction.reply({
+      content: '❌ Failed to validate channel restrictions. Please try again later.',
+      ephemeral: true,
+    });
+  }
+
+  // Check cooldown (1 hour = 3600000 ms)
+  if (config?.updated_at) {
+    const lastUpdate = new Date(config.updated_at).getTime();
+    const now = Date.now();
+    const cooldownMs = 60 * 60 * 1000;
+
+    if (now - lastUpdate < cooldownMs) {
+      const remainingMs = cooldownMs - (now - lastUpdate);
+      const minutesLeft = Math.ceil(remainingMs / 60000);
       return interaction.reply({
-        content: '❌ This command must be used in a server.',
+        embeds: [
+          new EmbedBuilder()
+            .setColor('Red')
+            .setTitle('⏳ Cooldown Active')
+            .setDescription(`The giveaway channel was changed recently. Please wait **${minutesLeft} minute(s)** before updating it again.`),
+        ],
         ephemeral: true,
       });
     }
+  }
 
-    // 2. Channel Execution Restriction Check
-    const { data: config, error: configError } = await supabase
-      .from('giveaway_channels')
-      .select('channel_id')
-      .eq('guild_id', guildId)
-      .maybeSingle();
+  // No change check
+  if (config?.channel_id === channel.id) {
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor('Orange')
+          .setTitle('ℹ️ No Changes Made')
+          .setDescription(`<#${channel.id}> is already the giveaway channel`)
+          .addFields({ name: 'Tip', value: 'To change the channel, specify a different one' }),
+      ],
+      ephemeral: true,
+    });
+  }
 
-    if (configError) {
-      console.error('❌ Supabase error:', configError);
-      return interaction.reply({
-        content: '❌ Failed to validate channel restrictions. Please try again later.',
-        ephemeral: true
+  // Permissions check
+  const botMember = guild.members.me;
+  if (!botMember?.permissionsIn(channel.id).has([PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+    return interaction.reply({
+      content: "❌ I need both 'Send Messages' and 'Embed Links' permissions in that channel.",
+      ephemeral: true,
+    });
+  }
+
+  // Confirmation buttons
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId('confirm_set_channel')
+      .setLabel('Confirm')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId('cancel_set_channel')
+      .setLabel('Cancel')
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  const confirmEmbed = new EmbedBuilder()
+    .setColor('Yellow')
+    .setTitle('⚠️ Confirm Giveaway Channel Change')
+    .setDescription(`Are you sure you want to set the giveaway channel to <#${channel.id}>?`);
+
+  const confirmMsg = await interaction.reply({
+    embeds: [confirmEmbed],
+    components: [row],
+    ephemeral: true,
+    fetchReply: true,
+  });
+
+  try {
+    const filter = (i: any) => ['confirm_set_channel', 'cancel_set_channel'].includes(i.customId) && i.user.id === interaction.user.id;
+    const confirmation = await confirmMsg.awaitMessageComponent({ componentType: ComponentType.Button, time: 30000, filter });
+
+    if (confirmation.customId === 'cancel_set_channel') {
+      await confirmation.update({
+        content: '❌ Giveaway channel update cancelled.',
+        embeds: [],
+        components: [],
       });
+      return;
     }
 
-    // If a channel is configured, enforce the restriction
-    if (config?.channel_id && interaction.channelId !== config.channel_id) {
-      const restrictionEmbed = new EmbedBuilder()
-        .setColor(0xFF0000)
-        .setTitle('🚫 Command Restricted')
-        .setDescription(`This command can only be used in <#${config.channel_id}>`)
-        .setFooter({
-          text: `Attempted in: #${interaction.channel && 'name' in interaction.channel ? interaction.channel.name : 'unknown'}`
-        });
-
-      return interaction.reply({
-        embeds: [restrictionEmbed],
-        ephemeral: true
-      });
-    }
-
-    // 3. Channel Existence Check
-    const targetChannel = guild.channels.cache.get(channel.id);
-    if (!targetChannel) {
-      return interaction.reply({
-        content: '❌ The specified channel was not found.',
-        ephemeral: true,
-      });
-    }
-
-    // 4. Bot Permission Check
-    const botMember = guild.members.me;
-    if (!botMember?.permissionsIn(channel.id).has([
-      PermissionFlagsBits.SendMessages,
-      PermissionFlagsBits.EmbedLinks
-    ])) {
-      return interaction.reply({
-        content: "❌ I need both 'Send Messages' and 'Embed Links' permissions in that channel.",
-        ephemeral: true,
-      });
-    }
-
-    // 5. No Change Check
-    if (config?.channel_id === channel.id) {
-      const noChangeEmbed = new EmbedBuilder()
-        .setColor(0xFFA500)
-        .setTitle('ℹ️ No Changes Made')
-        .setDescription(`<#${channel.id}> is already the giveaway channel`)
-        .addFields({
-          name: 'Tip',
-          value: 'To change the channel, specify a different one'
-        });
-      
-      return interaction.reply({
-        embeds: [noChangeEmbed],
-        ephemeral: true
-      });
-    }
-
-    // 6. Database Update
+    // User confirmed - update DB
     const { error: upsertError } = await supabase
       .from('giveaway_channels')
-      .upsert({ 
-        guild_id: guildId, 
+      .upsert({
+        guild_id: guildId,
         channel_id: channel.id,
         updated_at: new Date().toISOString(),
-        updated_by: interaction.user.id
+        updated_by: interaction.user.id,
       });
 
     if (upsertError) {
       console.error('Supabase Error:', upsertError);
-      return interaction.reply({
+      return confirmation.update({
         content: '❌ Database update failed. Please try again later.',
-        ephemeral: true,
+        embeds: [],
+        components: [],
       });
     }
 
-    // 7. Success Response
+    // Success response
     const successEmbed = new EmbedBuilder()
-      .setColor(0x00FF00)
+      .setColor('Green')
       .setTitle('✅ Giveaway Channel Updated')
       .setDescription(`Successfully set giveaway channel to <#${channel.id}>`)
-      .setThumbnail(guild.iconURL())
+      .setThumbnail(guild.iconURL() ?? null)
       .addFields(
-        { name: 'Previous Channel', value: config ? `<#${config.channel_id}>` : 'None set', inline: true },
+        { name: 'Previous Channel', value: config?.channel_id ? `<#${config.channel_id}>` : 'None set', inline: true },
         { name: 'Configured By', value: interaction.user.toString(), inline: true }
       )
       .setFooter({ text: `Server: ${guild.name}` })
       .setTimestamp();
 
-    return interaction.reply({
+    await confirmation.update({
       embeds: [successEmbed],
-      ephemeral: false
+      components: [],
+      content: null,
+    });
+
+  } catch (error) {
+    // Timeout or other error
+    await interaction.editReply({
+      content: '⏳ Confirmation timed out. Giveaway channel update cancelled.',
+      embeds: [],
+      components: [],
     });
   }
+}
