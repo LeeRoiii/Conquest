@@ -10,7 +10,7 @@ const TIER_ODDS = [0.4, 0.2, 0.12, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02];
 const PITY_THRESHOLD = 6;
 
 const TIER_DETAILS = [
-  { name: 'Tier 1', color: 'Grey', emoji: '🥉', gif: 'https://media.tenor.com/BzRS7UIlpAcAAAAC/ouch-fail.gif', flavor: 'Better luck next time!' },
+  { name: 'Tier 1', color: 'Grey', emoji: '🥉', gif: 'https://media1.tenor.com/m/6Q6RzWExaNUAAAAC/gold-one-piece.gif', flavor: 'Better luck next time!' },
   { name: 'Tier 2', color: 'Grey', emoji: '🥉', gif: 'https://media.tenor.com/3zC1Gp-tPM8AAAAC/small-prize.gif', flavor: 'A small win is still a win!' },
   { name: 'Tier 3', color: 'Green', emoji: '🪙', gif: 'https://media.tenor.com/4sX3GhAEm0sAAAAC/coin-money.gif', flavor: 'Not bad at all!' },
   { name: 'Tier 4', color: 'Green', emoji: '🪙', gif: 'https://media.tenor.com/AvEJjZb5dhUAAAAC/coins-drop.gif', flavor: 'You’re getting somewhere!' },
@@ -41,7 +41,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const discordId = interaction.user.id;
   const guildId = interaction.guildId!;
   const channelId = interaction.channelId;
-  const today = new Date().toISOString().slice(0, 10);  
+  const today = new Date().toISOString().slice(0, 10);
 
   const { data: config, error: configError } = await supabase
     .from('giveaway_channels')
@@ -96,7 +96,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     .eq('discord_id', discordId)
     .eq('roll_date', today);
 
-  if (rollsError) {
+  if (rollsError || !rollsToday) {
     console.error('❌ Error checking rolls:', rollsError);
     return interaction.editReply({ content: 'Something went wrong. Please try again later.' });
   }
@@ -105,14 +105,29 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const manualUnused = rollsToday.find(r => r.manual && r.tier_won === null);
 
   if (naturalRoll && !manualUnused) {
+    const now = new Date();
+    const reset = new Date(now);
+    reset.setUTCHours(16, 0, 0, 0); // 00:00 PHT = 16:00 UTC
+    if (now >= reset) reset.setUTCDate(reset.getUTCDate() + 1);
+
+    const msLeft = reset.getTime() - now.getTime();
+    const hours = Math.floor(msLeft / (1000 * 60 * 60));
+    const minutes = Math.floor((msLeft % (1000 * 60 * 60)) / (1000 * 60));
+    const timeLeftString = hours > 0
+      ? `⏳ Reset in ${hours}h ${minutes}m`
+      : `⏳ Reset in ${minutes}m`;
+
     return interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor('Orange')
-          .setTitle('⛔ Daily Limit Reached')
-          .setDescription('You can only roll **once per day**.\nCome back tomorrow for another chance!')
-          .setImage('https://media.tenor.com/4Vf_LUckhF8AAAAC/clock-waiting.gif')
-          .setFooter({ text: '⏳ Reset happens at midnight!' }),
+          .setTitle('🔒 No Rolls Left Today')
+          .setDescription([
+            'You’ve already used your **daily roll**!',
+            'Come back tomorrow to spin again 🎉',
+          ].join('\n'))
+          .setImage('https://media.tenor.com/Bg3YH6YHZzUAAAAd/waiting-patiently-bored.gif')
+          .setFooter({ text: timeLeftString }),
       ],
     });
   }
@@ -153,16 +168,28 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }
   }
 
-  // ⏳ Simulate suspense (2s delay)
+  // Suspense animation
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor('Blue')
+        .setTitle('🎲 Rolling...')
+        .setDescription('Spinning the prize wheel....')
+        .setImage('https://media.tenor.com/6BWKxLc307kAAAAm/gift-box.webp'),
+    ],
+  });
+
   await new Promise(res => setTimeout(res, 2000));
 
-  const embed = new EmbedBuilder()
+  const finalEmbed = new EmbedBuilder()
     .setColor(tierData.color as any)
     .setTitle(`${tierData.emoji} ${tierData.name} Reward!`)
     .setDescription(`**${tierData.flavor}**\n\n${isPity ? '🎁 You triggered the **Pity Bonus**!' : '✨ Good luck on the next one!'}`)
     .setImage(tierData.gif)
-    .setFooter({ text: '✅ Wallet verified — you’re eligible to win!' })
     .setTimestamp();
 
-  return interaction.editReply({ embeds: [embed] });
+  await interaction.editReply({
+    embeds: [finalEmbed],
+    components: [], // No buttons here
+  });
 }
