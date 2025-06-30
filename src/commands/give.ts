@@ -19,10 +19,7 @@ export const data = new SlashCommandBuilder()
       .setName('roll')
       .setDescription('Give extra roll(s) to a user')
       .addUserOption(opt =>
-        opt
-          .setName('user')
-          .setDescription('The user to receive the roll(s)')
-          .setRequired(true)
+        opt.setName('user').setDescription('User to receive the roll(s)').setRequired(true)
       )
       .addIntegerOption(opt =>
         opt
@@ -32,6 +29,16 @@ export const data = new SlashCommandBuilder()
           .setMinValue(1)
           .setMaxValue(2)
       )
+      .addStringOption(opt =>
+        opt
+          .setName('source')
+          .setDescription('Type of bonus roll (event, marketplace)')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Event', value: 'event' },        
+            { name: 'Marketplace', value: 'marketplace' } 
+          )
+      )
   )
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .setDMPermission(false);
@@ -40,6 +47,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand();
   const targetUser = interaction.options.getUser('user', true);
   const quantity = interaction.options.getInteger('quantity', true);
+  const source = interaction.options.getString('source', true);
   const modUser = interaction.user;
   const member = interaction.member as GuildMember;
 
@@ -58,24 +66,25 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId('confirm_grant')
-      .setLabel(` Yes, give ${quantity} roll${quantity > 1 ? 's' : ''}`)
+      .setLabel(`✅ Yes, give ${quantity} roll${quantity > 1 ? 's' : ''}`)
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId('cancel_grant')
-      .setLabel(' Cancel')
+      .setLabel('❌ Cancel')
       .setStyle(ButtonStyle.Danger)
   );
 
   const confirmMsg = await interaction.reply({
-    ephemeral: true,
+    flags: 64, // ephemeral true (deprecated alternative)
     embeds: [
       new EmbedBuilder()
         .setColor('Yellow')
         .setTitle('⚠️ Confirm Roll Grant')
-        .setDescription(`Are you sure you want to give **${quantity}** bonus roll${quantity > 1 ? 's' : ''} to ${targetUser}?`),
+        .setDescription(
+          `Are you sure you want to give **${quantity}** bonus roll${quantity > 1 ? 's' : ''} to ${targetUser}?\n\nSource: **${source}**`
+        ),
     ],
     components: [row],
-    fetchReply: true,
   });
 
   try {
@@ -96,21 +105,21 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date();
 
     const rollsToInsert = Array.from({ length: quantity }).map(() => ({
       discord_id: targetUser.id,
-      roll_date: today,
       tier_won: null,
       is_pity: false,
-      manual: true,
+      source, // ✅ uses fixed value like 'event' or 'marketplace'
       granted_by: modUser.id,
+      rolled_at: now,
     }));
 
     const { error } = await supabase.from('rolls').insert(rollsToInsert);
 
     if (error) {
-      console.error('❌ Supabase error inserting manual rolls:', error);
+      console.error('❌ Supabase error inserting rolls:', error);
       return confirmation.update({
         components: [],
         embeds: [
@@ -130,9 +139,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
           .setTitle('✅ Bonus Roll(s) Granted')
           .setDescription(`Successfully granted **${quantity}** bonus roll${quantity > 1 ? 's' : ''} to ${targetUser}.`)
           .addFields(
-            { name: 'User', value: `${targetUser.tag}`, inline: true },
+            { name: 'User', value: targetUser.tag, inline: true },
             { name: 'Quantity', value: `${quantity}`, inline: true },
-            { name: 'Date', value: today, inline: true }
+            { name: 'Source', value: source, inline: true },
+            { name: 'Time', value: `<t:${Math.floor(now.getTime() / 1000)}:f>`, inline: false }
           )
           .setFooter({ text: `Granted by ${modUser.tag}`, iconURL: modUser.displayAvatarURL() })
           .setThumbnail(targetUser.displayAvatarURL())
@@ -140,18 +150,17 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       ],
     });
 
-    // Fetch the giveaway channel from DB
-    const { data: channelData, error: channelError } = await supabase
+    // ✅ DM the user
+    const { data: config } = await supabase
       .from('giveaway_channels')
       .select('channel_id')
       .eq('guild_id', interaction.guildId)
       .maybeSingle();
 
-    const giveawayChannelMention = !channelError && channelData?.channel_id
-      ? `<#${channelData.channel_id}>`
-      : 'the designated giveaway channel';
+    const giveawayMention = config?.channel_id
+      ? `<#${config.channel_id}>`
+      : '`/roll` command channel';
 
-    // ✅ DM the target user with the channel mention included
     await targetUser.send({
       embeds: [
         new EmbedBuilder()
@@ -160,15 +169,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
             name: interaction.guild?.name || 'Server',
             iconURL: interaction.guild?.iconURL() ?? undefined,
           })
-          .setTitle('🎁 Bonus Roll Granted')
+          .setTitle('🎁 Bonus Roll Received')
           .setDescription(
-            `You’ve been granted **${quantity}** bonus roll${quantity > 1 ? 's' : ''} by **${modUser.tag}**.\n\n` +
-            `You can use your bonus roll${quantity > 1 ? 's' : ''} in ${giveawayChannelMention}!`
+            `You've been granted **${quantity}** bonus roll${quantity > 1 ? 's' : ''} by **${modUser.tag}**!\n\n` +
+            `💡 Use them in ${giveawayMention}.\nSource: **${source}**`
           )
-          .setFooter({
-            text: `${modUser.tag}`,
-            iconURL: modUser.displayAvatarURL(),
-          })
+          .setFooter({ text: `Given by ${modUser.tag}`, iconURL: modUser.displayAvatarURL() })
           .setTimestamp(),
       ],
     });
@@ -180,7 +186,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         new EmbedBuilder()
           .setColor('Grey')
           .setTitle('⏳ Confirmation Expired')
-          .setDescription('No response was received in time. Roll grant cancelled.'),
+          .setDescription('No response in time. Roll grant cancelled.'),
       ],
     });
   }

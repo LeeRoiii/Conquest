@@ -67,19 +67,28 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     });
   }
 
-  // 🔐 2. Role Check
+  // 🔐 2. Role Check – Must have Level 2+ role (Anti-alt / Anti-bot measure)
   const member = interaction.member as GuildMember;
   const requiredRoleId = process.env.LEVEL_2_ROLE_ID!;
+
   if (!member.roles.cache.has(requiredRoleId)) {
     return interaction.editReply({
       embeds: [
         new EmbedBuilder()
-          .setColor('#FF0000')
-          .setTitle('❌ Permission Denied')
-          .setDescription('You need the Level 2+ role to use this command.'),
+          .setColor('#FF4C4C') // Attention-grabbing red
+          .setTitle('❌ Access Denied – Level 2+ Required')
+          .setDescription(
+            `To use this feature, you need the **Level 2+** role.\n\n` +
+            `🔒 This is an **anti-alt / anti-bot** safeguard to ensure only trusted, active community members can roll.\n\n` +
+            `🧠 **How to get Level 2+**:\n• Be active in chat 💬\n• Participate in events 🎯\n• Let the leveling system rank you up!`
+          )
+          .setThumbnail(interaction.guild?.iconURL() ?? '')
+          .setFooter({ text: 'Level up and try again!', iconURL: interaction.user.displayAvatarURL() })
+          .setTimestamp(),
       ],
     });
   }
+
 
   // 🧾 3. Fetch User
   const { data: user, error: userError } = await supabase

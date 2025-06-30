@@ -1,9 +1,13 @@
-the PITY will work only if the user rolls 6 days without a reward 
+For Development Space
+-- put all logs on the process and transactions
+-- fix the history
+-- export 
+    - winners
+    --rolls
+    ---
 
-Each spin is logged for transparency and export
-📊 Prize Tiers
-Static list showing all prize tiers + odds
-Displayed via button press (ephemeral message)
-
-📖 Mechanics
-Explains how the system works (ephemeral message)
+For Production user
+-- madami
+-- add try catch  
+-- remove the error message 
+-- clean code - modularity - use DRY method
