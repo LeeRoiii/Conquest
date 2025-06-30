@@ -35,8 +35,8 @@ export const data = new SlashCommandBuilder()
           .setDescription('Type of bonus roll (event, marketplace)')
           .setRequired(true)
           .addChoices(
-            { name: 'Event', value: 'event' },        
-            { name: 'Marketplace', value: 'marketplace' } 
+            { name: 'Event', value: 'event' },
+            { name: 'Marketplace', value: 'marketplace' }
           )
       )
   )
@@ -44,6 +44,8 @@ export const data = new SlashCommandBuilder()
   .setDMPermission(false);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ ephemeral: true });
+
   const sub = interaction.options.getSubcommand();
   const targetUser = interaction.options.getUser('user', true);
   const quantity = interaction.options.getInteger('quantity', true);
@@ -51,9 +53,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const modUser = interaction.user;
   const member = interaction.member as GuildMember;
 
+  // Admin check
   if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
-    return interaction.reply({
-      ephemeral: true,
+    return interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor('Red')
@@ -63,19 +65,29 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     });
   }
 
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId('confirm_grant')
-      .setLabel(`✅ Yes, give ${quantity} roll${quantity > 1 ? 's' : ''}`)
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId('cancel_grant')
-      .setLabel('❌ Cancel')
-      .setStyle(ButtonStyle.Danger)
-  );
+  // Check if user exists and has a bound wallet
+  const { data: targetUserData } = await supabase
+    .from('users')
+    .select('wallet')
+    .eq('discord_id', targetUser.id)
+    .maybeSingle();
 
-  const confirmMsg = await interaction.reply({
-    flags: 64, // ephemeral true (deprecated alternative)
+  if (!targetUserData?.wallet) {
+    return interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor('Red')
+          .setTitle('❌ Cannot Grant Rolls')
+          .setDescription(
+            `The user ${targetUser} **has not bound their wallet yet**.\n\nThey must use the \`/wallet\` command to bind their Solana wallet first.`
+          )
+          .setFooter({ text: 'Wallet binding is required before receiving rolls.' }),
+      ],
+    });
+  }
+
+  // Confirmation prompt
+  const confirmMsg = await interaction.editReply({
     embeds: [
       new EmbedBuilder()
         .setColor('Yellow')
@@ -84,34 +96,47 @@ export async function execute(interaction: ChatInputCommandInteraction) {
           `Are you sure you want to give **${quantity}** bonus roll${quantity > 1 ? 's' : ''} to ${targetUser}?\n\nSource: **${source}**`
         ),
     ],
-    components: [row],
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('confirm_grant')
+          .setLabel(`✅ Yes, give ${quantity} roll${quantity > 1 ? 's' : ''}`)
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId('cancel_grant')
+          .setLabel('❌ Cancel')
+          .setStyle(ButtonStyle.Danger)
+      ),
+    ],
   });
 
   try {
     const confirmation = await confirmMsg.awaitMessageComponent({
       componentType: ComponentType.Button,
       time: 15_000,
-    });
+    }).catch(() => null);
 
-    if (
-      confirmation.customId === 'cancel_grant' ||
-      confirmation.user.id !== interaction.user.id
-    ) {
-      await confirmation.update({
-        content: '❌ Roll grant cancelled.',
+    if (!confirmation || confirmation.customId === 'cancel_grant' || confirmation.user.id !== modUser.id) {
+      await interaction.editReply({
         components: [],
-        embeds: [],
+        embeds: [
+          new EmbedBuilder()
+            .setColor('Grey')
+            .setTitle('⏳ Confirmation Expired')
+            .setDescription('No response in time. Roll grant cancelled.'),
+        ],
       });
       return;
     }
 
-    const now = new Date();
+    await confirmation.deferUpdate();
 
+    const now = new Date();
     const rollsToInsert = Array.from({ length: quantity }).map(() => ({
       discord_id: targetUser.id,
       tier_won: null,
       is_pity: false,
-      source, // ✅ uses fixed value like 'event' or 'marketplace'
+      source,
       granted_by: modUser.id,
       rolled_at: now,
     }));
@@ -120,7 +145,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     if (error) {
       console.error('❌ Supabase error inserting rolls:', error);
-      return confirmation.update({
+      return interaction.editReply({
         components: [],
         embeds: [
           new EmbedBuilder()
@@ -131,13 +156,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       });
     }
 
-    await confirmation.update({
+    await interaction.editReply({
       components: [],
       embeds: [
         new EmbedBuilder()
           .setColor('Green')
           .setTitle('✅ Bonus Roll(s) Granted')
-          .setDescription(`Successfully granted **${quantity}** bonus roll${quantity > 1 ? 's' : ''} to ${targetUser}.`)
+          .setDescription(
+            `Successfully granted **${quantity}** bonus roll${quantity > 1 ? 's' : ''} to ${targetUser}.`
+          )
           .addFields(
             { name: 'User', value: targetUser.tag, inline: true },
             { name: 'Quantity', value: `${quantity}`, inline: true },
@@ -150,7 +177,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       ],
     });
 
-    // ✅ DM the user
+    // DM the user if possible
     const { data: config } = await supabase
       .from('giveaway_channels')
       .select('channel_id')
@@ -177,9 +204,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
           .setFooter({ text: `Given by ${modUser.tag}`, iconURL: modUser.displayAvatarURL() })
           .setTimestamp(),
       ],
+    }).catch(() => {
+      console.warn(`❗ Could not DM ${targetUser.tag}`);
     });
 
   } catch (err) {
+    console.error('Confirmation error:', err);
     await interaction.editReply({
       components: [],
       embeds: [

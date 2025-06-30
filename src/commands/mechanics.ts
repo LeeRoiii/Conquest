@@ -9,7 +9,17 @@ export const data = new SlashCommandBuilder()
   .setDescription('📖 Mechanics — How the prize system works');
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply({ ephemeral: true });
+  // 🕒 Set fallback timeout in case deferReply fails too late
+  const timeout = setTimeout(() => {
+    if (!interaction.replied && !interaction.deferred) {
+      interaction.reply({
+        content: '⏳ Loading prize system info...',
+        ephemeral: true,
+      }).catch(() => {});
+    }
+  }, 2500);
+
+  await interaction.deferReply({ ephemeral: true }).catch(() => {}); // fallback safe
 
   const embed = new EmbedBuilder()
     .setColor('Blue')
@@ -44,5 +54,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     )
     .setFooter({ text: 'Good luck, and may the odds be ever in your favor!' });
 
-  await interaction.editReply({ embeds: [embed] });
+  await interaction.editReply({ embeds: [embed] }).catch(() => {});
+  clearTimeout(timeout);
 }

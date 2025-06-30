@@ -11,3 +11,6 @@ For Production user
 -- add try catch  
 -- remove the error message 
 -- clean code - modularity - use DRY method
+Wrap the DM send in a try-catch since users might have DMs disabled
+
+Consider using a transaction for inserting multiple rolls

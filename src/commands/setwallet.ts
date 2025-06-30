@@ -15,7 +15,7 @@ import {
 import { supabase } from '../supabaseClient';
 
 const WALLET_CHANGE_COOLDOWN_DAYS = 3;
-const COLLECTOR_TIMEOUT = 30000;
+const COLLECTOR_TIMEOUT = 180000; // 3 minutes
 
 function isValidSolanaAddress(address: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
@@ -35,7 +35,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const discordId = interaction.user.id;
   const username = interaction.user.tag;
 
-  // 🔒 1. Channel Restriction Check via Supabaseasdasd
   const guildId = interaction.guildId;
   const currentChannelId = interaction.channelId;
 
@@ -47,9 +46,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (configError) {
     console.error('❌ Supabase error:', configError);
-    return interaction.editReply({
-      content: '❌ Failed to validate the giveaway channel.',
-    });
+    return interaction.editReply({ content: '❌ Failed to validate the giveaway channel.' });
   }
 
   if (!config || config.channel_id !== currentChannelId) {
@@ -62,12 +59,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         text: `Attempted in: #${interaction.channel && 'name' in interaction.channel ? interaction.channel.name : 'unknown'}`,
       });
 
-    return interaction.editReply({
-      embeds: [restrictionEmbed],
-    });
+    return interaction.editReply({ embeds: [restrictionEmbed] });
   }
 
-  // 🔐 2. Role Check – Must have Level 2+ role (Anti-alt / Anti-bot measure)
   const member = interaction.member as GuildMember;
   const requiredRoleId = process.env.LEVEL_2_ROLE_ID!;
 
@@ -75,7 +69,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return interaction.editReply({
       embeds: [
         new EmbedBuilder()
-          .setColor('#FF4C4C') // Attention-grabbing red
+          .setColor('#FF4C4C')
           .setTitle('❌ Access Denied – Level 2+ Required')
           .setDescription(
             `To use this feature, you need the **Level 2+** role.\n\n` +
@@ -89,8 +83,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     });
   }
 
-
-  // 🧾 3. Fetch User
   const { data: user, error: userError } = await supabase
     .from('users')
     .select('wallet, updated_at')
@@ -117,11 +109,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const now = new Date();
 
   if (user?.wallet) {
-
     const lastUpdated = user.updated_at ? new Date(user.updated_at) : null;
-    const diffDays = lastUpdated
-      ? (now.getTime() - lastUpdated.getTime()) / (1000 * 60 * 60 * 24)
-      : 0;
+    const diffDays = lastUpdated ? (now.getTime() - lastUpdated.getTime()) / (1000 * 60 * 60 * 24) : 0;
     const canChange = diffDays >= WALLET_CHANGE_COOLDOWN_DAYS;
 
     embed.addFields({
@@ -148,10 +137,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     await interaction.editReply({ embeds: [embed], components: [row] });
   } else {
-    embed.addFields({
-      name: 'Wallet Status',
-      value: '❌ No wallet bound to your account',
-    });
+    embed.addFields({ name: 'Wallet Status', value: '❌ No wallet bound to your account' });
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
@@ -164,7 +150,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     await interaction.editReply({ embeds: [embed], components: [row] });
   }
 
-  // 🎯 4. Collector for Button Clicks
   const collector = interaction.channel!.createMessageComponentCollector({
     componentType: ComponentType.Button,
     time: COLLECTOR_TIMEOUT,
@@ -173,11 +158,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   collector.on('collect', async (i: MessageComponentInteraction) => {
     try {
-      await i.deferUpdate();
-
-      await interaction.editReply({ components: [] }); // Clean up buttons
-
       if (i.customId === 'view_wallet' && user?.wallet) {
+        await i.deferUpdate();
+        await interaction.editReply({ components: [] });
         return i.followUp({
           ephemeral: true,
           embeds: [
@@ -190,43 +173,39 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       }
 
       if (i.customId === 'bind_wallet' || i.customId === 'change_wallet') {
+        await interaction.editReply({ components: [] });
         await handleWalletModal(i, discordId, username, i.customId === 'change_wallet');
       }
     } catch (err) {
       console.error('Interaction error:', err);
-      interaction.editReply({
-        content: '❌ Something went wrong.',
-        components: [],
-      });
+      if (!i.replied) {
+        await i.reply({ content: '❌ Something went wrong.', ephemeral: true });
+      }
     }
   });
 
   collector.on('end', collected => {
     if (collected.size === 0) {
-      interaction.editReply({
-        content: '⌛ Menu timed out. Use /wallet again if needed.',
-        components: [],
-      });
+      interaction.editReply({ content: '⌛ Menu timed out after 3 minutes. Use /wallet again if needed.', components: [] });
     }
   });
 }
 
-// 💾 Wallet Modal Logic
 async function handleWalletModal(
-  interaction: MessageComponentInteraction,
+  interaction: ChatInputCommandInteraction | MessageComponentInteraction,
   discordId: string,
   username: string,
   isChange: boolean,
 ) {
   const modal = new ModalBuilder()
     .setCustomId(isChange ? 'change_wallet_modal' : 'bind_wallet_modal')
-    .setTitle(isChange ? 'Change Wallet' : 'Bind Wallet')
+    .setTitle(isChange ? 'Change Your Solana Wallet' : 'Bind Your Solana Wallet')
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId('wallet_input')
-          .setLabel('Enter your wallet address')
-          .setStyle(TextInputStyle.Short)
+          .setLabel('Your Solana address')
+          .setStyle(TextInputStyle.Paragraph)
           .setRequired(true)
           .setMinLength(32)
           .setMaxLength(44)
@@ -296,9 +275,6 @@ async function handleWalletModal(
     }
   } catch (err) {
     console.error('Modal error:', err);
-    interaction.followUp({
-      ephemeral: true,
-      content: '⌛ You took too long. Please try again.',
-    });
+    interaction.followUp({ ephemeral: true, content: '⌛ You took too long (3 minutes). Please try again.' });
   }
 }

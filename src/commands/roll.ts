@@ -30,169 +30,184 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const channelId = interaction.channelId;
   const now = new Date();
 
-  // ✅ Giveaway channel check
-  const { data: config } = await supabase
-    .from('giveaway_channels')
-    .select('channel_id')
-    .eq('guild_id', guildId)
-    .maybeSingle();
+  // 🛡️ Try to insert a lock to prevent "unli roll"
+  const { error: lockError } = await supabase
+    .from('roll_locks')
+    .insert({ discord_id: discordId });
 
-  if (!config || config.channel_id !== channelId) {
+  if (lockError) {
     return interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor('Red')
-          .setTitle('🚫 Command Restricted')
-          .setDescription(`This command can only be used in <#${config?.channel_id || 'not_set'}>.`),
+          .setTitle('⚠️ Slow Down')
+          .setDescription('You already have an active roll in progress. Please wait a few seconds and try again.'),
       ],
     });
   }
 
-  // ✅ Wallet check
-  const { data: user } = await supabase
-    .from('users')
-    .select('wallet')
-    .eq('discord_id', discordId)
-    .maybeSingle();
+  try {
+    // ✅ Giveaway channel check
+    const { data: config } = await supabase
+      .from('giveaway_channels')
+      .select('channel_id')
+      .eq('guild_id', guildId)
+      .maybeSingle();
 
-  if (!user?.wallet) {
-    return interaction.editReply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor('Red')
-          .setTitle('❌ No Wallet Found')
-          .setDescription(
-            `To use the prize wheel, you need to **bind your Solana wallet** first.\n\n` +
-            `📌 Use the \`/wallet\` command and choose **Bind Wallet** to connect your wallet.\n` +
-            `⚠️ Make sure you're eligible (e.g. have the required Level 2+ role).\n\n` +
-            `Once your wallet is linked, come back and roll for a chance to win rewards! 🎁`
-          )
-          .setFooter({ text: 'Wallet binding is required for prize tracking.' })
-          .setThumbnail(interaction.guild?.iconURL() ?? ''),
-      ],
-    });
-  }
-
-  // ✅ Check for any available non-daily roll
-  const { data: availableRolls } = await supabase
-    .from('rolls')
-    .select('id, source')
-    .eq('discord_id', discordId)
-    .in('source', ['bonus', 'event', 'marketplace'])
-    .is('tier_won', null);
-
-  const usableRoll = availableRolls?.[0];
-
-// ❌ No extra roll? Check daily cooldown
-if (!usableRoll) {
-  const { data: lastRoll } = await supabase
-    .from('rolls')
-    .select('rolled_at')
-    .eq('discord_id', discordId)
-    .eq('source', 'daily')
-    .order('rolled_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (lastRoll?.rolled_at) {
-    const lastTime = new Date(lastRoll.rolled_at);
-    const nextAvailable = new Date(lastTime.getTime() + 24 * 60 * 60 * 1000);
-
-    if (now < nextAvailable) {
-      const msLeft = nextAvailable.getTime() - now.getTime();
-      const hours = Math.floor(msLeft / 3600000);
-      const minutes = Math.floor((msLeft % 3600000) / 60000);
-
+    if (!config || config.channel_id !== channelId) {
       return interaction.editReply({
         embeds: [
           new EmbedBuilder()
-            .setColor('Orange')
-            .setTitle('🔒 No Rolls Left Yet')
-            .setDescription(
-              ` You already used your **daily roll**!\n\n` +
-              `⏳ Next roll in **${hours}h ${minutes}m**\n\n` +
-              `💡 *Want more rolls?* Earn them through **events**, **marketplace**.`
-            ),
+            .setColor('Red')
+            .setTitle('🚫 Command Restricted')
+            .setDescription(`This command can only be used in <#${config?.channel_id || 'not_set'}>.`),
         ],
       });
     }
-  }
-}
 
-  // 🎲 Perform roll
-  const { tier, isPity } = await getFinalTier(discordId);
-  const tierData = TIER_DETAILS[tier - 1];
-  const source = usableRoll ? usableRoll.source : 'daily';
+    // ✅ Wallet check
+    const { data: user } = await supabase
+      .from('users')
+      .select('wallet')
+      .eq('discord_id', discordId)
+      .maybeSingle();
 
-  // ✅ Save roll result
-  let insertedRollId: string | null = null;
-  if (usableRoll) {
-    await supabase
+    if (!user?.wallet) {
+      return interaction.editReply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor('Red')
+            .setTitle('❌ No Wallet Found')
+            .setDescription(
+              `To use the prize wheel, you need to **bind your Solana wallet** first.\n\n` +
+              `📌 Use the \`/wallet\` command and choose **Bind Wallet** to connect your wallet.\n` +
+              `⚠️ Make sure you're eligible (e.g. have the required Level 2+ role).\n\n` +
+              `Once your wallet is linked, come back and roll for a chance to win rewards! 🎁`
+            )
+            .setFooter({ text: 'Wallet binding is required for prize tracking.' })
+            .setThumbnail(interaction.guild?.iconURL() ?? ''),
+        ],
+      });
+    }
+
+    // ✅ Check bonus/event/marketplace rolls first
+    const { data: availableRolls } = await supabase
       .from('rolls')
-      .update({ tier_won: tier, is_pity: isPity, rolled_at: now })
-      .eq('id', usableRoll.id);
-    insertedRollId = usableRoll.id;
-  } else {
-    const { data: insertedRoll } = await supabase
-      .from('rolls')
-      .insert({
+      .select('id, source')
+      .eq('discord_id', discordId)
+      .in('source', ['bonus', 'event', 'marketplace'])
+      .is('tier_won', null);
+
+    const usableRoll = availableRolls?.[0];
+
+    // ❌ No extra roll? Check daily cooldown
+    if (!usableRoll) {
+      const { data: lastRoll } = await supabase
+        .from('rolls')
+        .select('rolled_at')
+        .eq('discord_id', discordId)
+        .eq('source', 'daily')
+        .order('rolled_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastRoll?.rolled_at) {
+        const lastTime = new Date(lastRoll.rolled_at);
+        const nextAvailable = new Date(lastTime.getTime() + 24 * 60 * 60 * 1000);
+
+        if (now < nextAvailable) {
+          const msLeft = nextAvailable.getTime() - now.getTime();
+          const hours = Math.floor(msLeft / 3600000);
+          const minutes = Math.floor((msLeft % 3600000) / 60000);
+
+          return interaction.editReply({
+            embeds: [
+              new EmbedBuilder()
+                .setColor('Orange')
+                .setTitle('🔒 No Rolls Left Yet')
+                .setDescription(
+                  `You already used your **daily roll**!\n\n` +
+                  `⏳ Next roll in **${hours}h ${minutes}m**\n\n` +
+                  `💡 *Want more rolls?* Earn them through **events**, **marketplace**.`
+                ),
+            ],
+          });
+        }
+      }
+    }
+
+    // 🎲 Perform roll
+    const { tier, isPity } = await getFinalTier(discordId);
+    const tierData = TIER_DETAILS[tier - 1];
+    const source = usableRoll ? usableRoll.source : 'daily';
+
+    // ✅ Save roll
+    let insertedRollId: string | null = null;
+    if (usableRoll) {
+      await supabase
+        .from('rolls')
+        .update({ tier_won: tier, is_pity: isPity, rolled_at: now })
+        .eq('id', usableRoll.id);
+      insertedRollId = usableRoll.id;
+    } else {
+      const { data: insertedRoll } = await supabase
+        .from('rolls')
+        .insert({
+          discord_id: discordId,
+          tier_won: tier,
+          is_pity: isPity,
+          source,
+          rolled_at: now,
+        })
+        .select()
+        .single();
+      insertedRollId = insertedRoll?.id;
+    }
+
+    await updatePityStreak(discordId, tier);
+
+    if (tier >= 1 && tier <= 9 && insertedRollId) {
+      await supabase.from('prizes').insert({
         discord_id: discordId,
-        tier_won: tier,
-        is_pity: isPity,
-        source,
-        rolled_at: now,
-      })
-      .select()
-      .single();
-    insertedRollId = insertedRoll?.id;
-  }
+        username: interaction.user.tag,
+        wallet: user.wallet,
+        tier,
+        tier_label: `Tier ${tier}`,
+        roll_id: insertedRollId,
+        won_at: now,
+      });
+    }
 
-  await updatePityStreak(discordId, tier);
-
-  // 🎁 Insert prize
-  if (tier >= 1 && tier <= 9 && insertedRollId) {
-    await supabase.from('prizes').insert({
-      discord_id: discordId,
-      username: interaction.user.tag,
-      wallet: user.wallet,
-      tier,
-      tier_label: `Tier ${tier}`,
-      roll_id: insertedRollId,
-      won_at: now,
+    // 🌀 Animation
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor('Blue')
+          .setTitle('🎲 Rolling...')
+          .setDescription('Spinning the prize wheel...')
+          .setImage('https://media.tenor.com/6BWKxLc307kAAAAm/gift-box.webp'),
+      ],
     });
+
+    await new Promise(res => setTimeout(res, 2000));
+
+    // 🎉 Final result
+    const finalEmbed = new EmbedBuilder()
+      .setColor(tierData.color as any)
+      .setTitle(`${tierData.emoji} ${tierData.name} Reward!`)
+      .setDescription(
+        `**${tierData.flavor}**\n\n${isPity ? '🎁 You triggered the **Pity Bonus**!' : '✨ Good luck on the next one!'}`
+      )
+      .setImage(tierData.gif)
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [finalEmbed] });
+
+  } finally {
+    // 🔓 Always remove lock even if the command fails
+    await supabase
+      .from('roll_locks')
+      .delete()
+      .eq('discord_id', discordId);
   }
-
-  // 🌀 Rolling animation
-  await interaction.editReply({
-    embeds: [
-      new EmbedBuilder()
-        .setColor('Blue')
-        .setTitle('🎲 Rolling...')
-        .setDescription('Spinning the prize wheel...')
-        .setImage('https://media.tenor.com/6BWKxLc307kAAAAm/gift-box.webp'),
-    ],
-  });
-
-  await new Promise(res => setTimeout(res, 2000));
-
-  // 🎉 Final result
-  const finalEmbed = new EmbedBuilder()
-    .setColor(tierData.color as any)
-    .setTitle(`${tierData.emoji} ${tierData.name} Reward!`)
-    .setDescription(
-      `**${tierData.flavor}**\n\n${isPity ? '🎁 You triggered the **Pity Bonus**!' : '✨ Good luck on the next one!'}`
-    )
-    .setImage(tierData.gif)
-    .setTimestamp();
-
-  await interaction.editReply({ embeds: [finalEmbed] });
 }
-// This command allows users to roll for prizes, checking wallet binding and cooldowns.
-// It handles both daily and bonus rolls, updates pity streaks, and saves results to the  
-// database. The final result is displayed with a themed embed based on the tier won.
-// It also includes a cooldown mechanism for daily rolls and provides feedback on the next available roll time.
-// The command is designed to be used in a specific channel configured in the database,
-// ensuring users have the required role to participate. The roll results are saved in a structured way,
-// allowing for easy retrieval and management of user prizes.
-// The command also includes a rolling animation to enhance user experience.
-// It uses a tier system with different colors, emojis, and GIFs for each tier,
