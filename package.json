@@ -2,7 +2,7 @@
   "name": "giveaway-bot",
   "version": "1.0.0",
   "description": "A Discord giveaway bot with wallet binding, XP system, and admin controls.",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",
     "register": "ts-node src/register-commands.ts",
@@ -19,18 +19,18 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "@supabase/supabase-js": "^2.50.2",
+    "@supabase/supabase-js": "^2.43.4",
     "csv-stringify": "^6.5.2",
-    "dayjs": "^1.11.13",
-    "discord.js": "^14.21.0",
-    "dotenv": "^16.6.0",
+    "dayjs": "^1.11.11",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
     "envalid": "^8.0.0"
   },
   "devDependencies": {
     "@types/csv-stringify": "^1.4.3",
-    "@types/node": "^20.4.2",
-    "@types/pdfkit": "^0.14.0",
+    "@types/node": "^20.14.9",
+    "@types/pdfkit": "^0.13.4",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.5.3"
   }
 }

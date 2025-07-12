@@ -33,7 +33,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
   presence: {
-    activities: [{ name: 'giveaways', type: ActivityType.Watching }],
+    activities: [{ name: 'Checking For Enemy', type: ActivityType.Watching }],
     status: 'online',
   },
 }) as Client & { commands: Collection<string, Command>; cooldowns: Collection<string, Map<string, number>> };

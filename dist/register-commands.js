@@ -5,36 +5,43 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const discord_js_1 = require("discord.js");
 const dotenv_1 = __importDefault(require("dotenv"));
-// Import commands
-const bindWallet_1 = require("./commands/bindWallet");
-const setGiveawayChannel_1 = require("./commands/setGiveawayChannel");
-const stopBot_1 = require("./commands/stopBot");
-const uptime_1 = require("./commands/uptime");
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
 dotenv_1.default.config();
 // Validate required environment variables
-if (!process.env.DISCORD_TOKEN || !process.env.CLIENT_ID || !process.env.GUILD_ID) {
-    throw new Error('❌ Missing required environment variables: DISCORD_TOKEN, CLIENT_ID, or GUILD_ID');
+const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID } = process.env;
+if (!DISCORD_TOKEN || !CLIENT_ID || !GUILD_ID) {
+    throw new Error('❌ Missing environment variables: DISCORD_TOKEN, CLIENT_ID, or GUILD_ID');
 }
-// Log partial secrets for verification
-console.log('📦 Loading environment variables...');
-console.log('🔑 DISCORD_TOKEN starts with:', process.env.DISCORD_TOKEN?.slice(0, 10));
-console.log('🆔 CLIENT_ID:', process.env.CLIENT_ID);
-console.log('🛡 GUILD_ID:', process.env.GUILD_ID);
-// Prepare the slash commands
-const commands = [
-    bindWallet_1.data.toJSON(),
-    setGiveawayChannel_1.data.toJSON(), // ✅ updated
-    stopBot_1.data.toJSON(),
-    uptime_1.data.toJSON(),
-];
-// Create REST client
-const rest = new discord_js_1.REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-// Register commands with Discord API
+// Load all slash commands from /commands directory
+const commandsPath = path_1.default.join(__dirname, 'commands');
+const commandFiles = fs_1.default
+    .readdirSync(commandsPath)
+    .filter(file => file.endsWith('.ts') || file.endsWith('.js'));
+const commandMap = new Map();
+for (const file of commandFiles) {
+    const filePath = path_1.default.join(commandsPath, file);
+    const commandModule = require(filePath);
+    if ('data' in commandModule && commandModule.data instanceof discord_js_1.SlashCommandBuilder) {
+        const commandName = commandModule.data.name;
+        if (commandMap.has(commandName)) {
+            console.warn(`⚠️ Duplicate command name found: "${commandName}". Skipping ${file}.`);
+            continue;
+        }
+        commandMap.set(commandName, commandModule.data.toJSON());
+    }
+    else {
+        console.warn(`⚠️ Skipping ${file} - Missing or invalid 'data' export`);
+    }
+}
+const commands = Array.from(commandMap.values());
+// Register commands
+const rest = new discord_js_1.REST({ version: '10' }).setToken(DISCORD_TOKEN);
 (async () => {
     try {
-        console.log('🚀 Registering commands...');
-        await rest.put(discord_js_1.Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: commands });
-        console.log('✅ Slash commands registered.');
+        console.log(`🚀 Registering ${commands.length} unique slash command(s)...`);
+        await rest.put(discord_js_1.Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
+        console.log(`✅ Successfully registered ${commands.length} command(s) to guild ${GUILD_ID}.`);
     }
     catch (err) {
         console.error('❌ Failed to register commands:', err);

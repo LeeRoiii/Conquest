@@ -1,0 +1,3 @@
+/attack
+fix the /upgrade
+/alliance
