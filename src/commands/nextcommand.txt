@@ -1,4 +1,40 @@
-/attack
+/attack|
+⚔️ Battle Report
+Attacker: Potato | Defender: KnightX
+📉 Losses: 3 archers, 5 militia
+🏆 Victory! Gained +15 gold, +10 food
+
+
+
 fix the /upgrade
-/alliance
+
+Add autocomplete or suggestion list of owned buildings.
+
+Validate max level based on building metadata.
+
+Show current level, next bonus, and cost before confirmation.
+
+🤝 /alliance – Diplomacy Feature
+Introduce:
+
+/alliance create <name> — Create an alliance
+
+/alliance invite @user — Invite players
+
+/alliance join <name> — Accept invite
+
+/alliance info — Show members, victories
+
+Future Add-ons:
+
+Shared resources bank
+
+Alliance wars
+
+Alliance leaderboard
+
+
+
 asdasd
+
+///
